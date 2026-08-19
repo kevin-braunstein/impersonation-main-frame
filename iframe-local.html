@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Renderer Policy / Navigator Probe — Local iframe</title>
+
+<!--
+  ============================================================================
+  Same-origin child frame for renderer-policy-probe.html.
+
+  This is meant to be loaded two ways:
+    1. Embedded via <iframe src="iframe-local.html"> from a page on the SAME
+       origin - this is the "local iframe" case: same site, so under
+       Chromium/CEF Site Isolation this normally shares the parent's renderer
+       process (same TID_RENDERER thread).
+    2. Opened directly in a tab - it still renders its own table below, for
+       standalone debugging.
+
+  Reports its snapshots to window.parent via postMessage (harmless no-op if
+  there is no parent, i.e. when opened standalone).
+  ============================================================================
+-->
+<script>
+  function fgCollectSync() {
+    var out = { capturedAt: new Date().toISOString() };
+
+    try {
+      out.fireglassGetRendererPolicy = (typeof window.fireglassGetRendererPolicy === 'function')
+        ? window.fireglassGetRendererPolicy()
+        : '(window.fireglassGetRendererPolicy is not defined in this context)';
+    } catch (e) {
+      out.fireglassGetRendererPolicy = { error: String(e) };
+    }
+
+    out.userAgent = navigator.userAgent;
+
+    try {
+      out.userAgentData = navigator.userAgentData
+        ? navigator.userAgentData.toJSON()
+        : '(navigator.userAgentData is not supported in this context)';
+    } catch (e) {
+      out.userAgentData = { error: String(e) };
+    }
+
+    try {
+      out.languages = Array.from(navigator.languages || []);
+    } catch (e) {
+      out.languages = { error: String(e) };
+    }
+
+    try {
+      out.intlDateTimeFormatResolvedOptions = new Intl.DateTimeFormat().resolvedOptions();
+    } catch (e) {
+      out.intlDateTimeFormatResolvedOptions = { error: String(e) };
+    }
+
+    return out;
+  }
+
+  // Captured immediately, before anything else in this document runs, and
+  // posted to the parent right away - window.parent already exists as soon
+  // as this frame exists, even before the rest of the document is parsed.
+  window.__fgInitialSnapshot = fgCollectSync();
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ source: 'fg-probe', role: 'local', kind: 'initial', data: window.__fgInitialSnapshot }, '*');
+  }
+</script>
+
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; color: #111; font-size: 13px; }
+  .fg-meta { color: #555; margin-bottom: 8px; }
+  .fg-note { color: #555; font-size: 11px; font-style: italic; }
+  table.fg-probe-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  table.fg-probe-table th, table.fg-probe-table td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; text-align: left; }
+  table.fg-probe-table th { background: #f5f5f5; }
+  table.fg-probe-table td.fg-metric { font-weight: 600; width: 22%; }
+  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; max-height: 160px; overflow: auto; }
+  td.fg-changed { background: #fff3b0; }
+  .fg-timestamp { color: #777; font-size: 10px; margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<p class="fg-meta">
+  Frame: <strong>local iframe (same-origin)</strong> &middot;
+  Origin: <code id="fg-origin"></code> &middot;
+  Is top: <code id="fg-is-top"></code>
+</p>
+<div id="fg-section"></div>
+<p class="fg-note">
+  navigator.userAgentData's high-entropy values only appear in the Current
+  column - they're async by spec and can't be captured in the Initial script.
+</p>
+
+<script>
+  document.getElementById('fg-origin').textContent = location.origin;
+  document.getElementById('fg-is-top').textContent = (window === window.top);
+
+  var METRICS = [
+    ['window.fireglassGetRendererPolicy()', 'fireglassGetRendererPolicy'],
+    ['navigator.userAgent', 'userAgent'],
+    ['navigator.userAgentData', 'userAgentData'],
+    ['navigator.languages', 'languages'],
+    ['Intl.DateTimeFormat().resolvedOptions()', 'intlDateTimeFormatResolvedOptions']
+  ];
+
+  function fgEscapeHtml(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+
+  function fgFormatValue(v) {
+    if (v === undefined) return '<em>(not yet received)</em>';
+    return '<pre>' + fgEscapeHtml(JSON.stringify(v, null, 2)) + '</pre>';
+  }
+
+  function fgValuesEqual(key, a, b) {
+    var bCompare = b;
+    if (key === 'userAgentData' && b && typeof b === 'object') {
+      bCompare = Object.assign({}, b);
+      delete bCompare.highEntropyValues;
+      delete bCompare.highEntropyValuesError;
+    }
+    return JSON.stringify(a) === JSON.stringify(bCompare);
+  }
+
+  function fgRenderTable(containerEl, initialSnap, currentSnap) {
+    var capturedAt = (currentSnap && currentSnap.capturedAt) || (initialSnap && initialSnap.capturedAt) || '';
+    var html = '<div class="fg-timestamp">Last update: ' + fgEscapeHtml(capturedAt) + '</div>';
+    html += '<table class="fg-probe-table"><thead><tr>' +
+            '<th>Metric</th><th>Initial (page load)</th><th>Current (live)</th>' +
+            '</tr></thead><tbody>';
+    METRICS.forEach(function (pair) {
+      var label = pair[0], key = pair[1];
+      var a = initialSnap ? initialSnap[key] : undefined;
+      var b = currentSnap ? currentSnap[key] : undefined;
+      var changed = (a !== undefined && b !== undefined && !fgValuesEqual(key, a, b));
+      html += '<tr><td class="fg-metric">' + fgEscapeHtml(label) + '</td>' +
+              '<td>' + fgFormatValue(a) + '</td>' +
+              '<td class="' + (changed ? 'fg-changed' : '') + '">' + fgFormatValue(b) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    containerEl.innerHTML = html;
+  }
+
+  async function fgCollectFull() {
+    var snap = fgCollectSync();
+    if (navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === 'function') {
+      try {
+        var hints = ['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'uaFullVersion', 'wow64'];
+        var highEntropy = await navigator.userAgentData.getHighEntropyValues(hints);
+        snap.userAgentData = Object.assign({}, snap.userAgentData, { highEntropyValues: highEntropy });
+      } catch (e) {
+        snap.userAgentData = Object.assign({}, snap.userAgentData, { highEntropyValuesError: String(e) });
+      }
+    }
+    return snap;
+  }
+
+  var state = { initial: window.__fgInitialSnapshot, current: null };
+  var sectionEl = document.getElementById('fg-section');
+
+  async function fgUpdate() {
+    state.current = await fgCollectFull();
+    fgRenderTable(sectionEl, state.initial, state.current);
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ source: 'fg-probe', role: 'local', kind: 'current', data: state.current }, '*');
+    }
+  }
+  fgUpdate();
+  setInterval(fgUpdate, 1000);
+</script>
+
+</body>
+</html>
