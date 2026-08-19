@@ -45,6 +45,23 @@
       out.userAgentData = { error: String(e) };
     }
 
+    // Direct property reads, as opposed to .toJSON() above. Chromium's native
+    // NavigatorUAData.prototype.toJSON reads an internal engine slot rather
+    // than going through these getters, so an override that only patches the
+    // brands/mobile/platform getters (not toJSON) makes this metric diverge
+    // from the one above - see the divergence highlight in fgRenderTable.
+    try {
+      out.userAgentDataDirect = navigator.userAgentData
+        ? {
+            brands: navigator.userAgentData.brands,
+            mobile: navigator.userAgentData.mobile,
+            platform: navigator.userAgentData.platform
+          }
+        : '(navigator.userAgentData is not supported in this context)';
+    } catch (e) {
+      out.userAgentDataDirect = { error: String(e) };
+    }
+
     try {
       out.languages = Array.from(navigator.languages || []);
     } catch (e) {
@@ -75,6 +92,7 @@
   table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
   td.fg-green { background: #d9f2d9; }
   td.fg-red { background: #f8d7d7; }
+  td.fg-uadata-diverges { outline: 3px solid #ff9800; outline-offset: -3px; }
   .fg-timestamp { color: #777; font-size: 10px; margin: 2px 0; }
   .fg-copy-btn { margin: 4px 0; padding: 5px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f5f5f5; }
   .fg-copy-btn.fg-copy-error { background: #f8d7d7; border-color: #c66; }
@@ -99,6 +117,11 @@
 <p class="fg-note">
   navigator.userAgentData's high-entropy values only appear in the Current
   column - they're async by spec and can't be captured in the Initial script.
+  The "direct property reads" row gets an orange outline whenever it differs
+  from .toJSON()'s value in the same snapshot - Chromium's native toJSON()
+  reads an internal engine slot rather than the JS-visible getters, so an
+  override that patches the getters but not toJSON() leaks a different value
+  to anything calling .toJSON() or JSON.stringify(navigator.userAgentData).
 </p>
 
 <script>
@@ -109,6 +132,7 @@
     ['window.fireglassGetRendererPolicy()', 'fireglassGetRendererPolicy'],
     ['navigator.userAgent', 'userAgent'],
     ['navigator.userAgentData', 'userAgentData'],
+    ['navigator.userAgentData (direct property reads)', 'userAgentDataDirect'],
     ['navigator.languages', 'languages'],
     ['Intl.DateTimeFormat().resolvedOptions()', 'intlDateTimeFormatResolvedOptions']
   ];
@@ -124,14 +148,38 @@
     return '<pre>' + fgEscapeHtml(JSON.stringify(v, null, 2)) + '</pre>';
   }
 
-  function fgValuesEqual(key, a, b) {
-    var bCompare = b;
-    if (key === 'userAgentData' && b && typeof b === 'object') {
-      bCompare = Object.assign({}, b);
-      delete bCompare.highEntropyValues;
-      delete bCompare.highEntropyValuesError;
+  // navigator.userAgentData's "Current" value carries an extra async
+  // highEntropyValues field that "Initial" can never have (see note above).
+  // Strip it before diffing so that addition alone doesn't spuriously flag
+  // the row as "changed", and before comparing it against the direct-read
+  // metric (which never has that field either).
+  function fgStripHighEntropy(v) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      var copy = Object.assign({}, v);
+      delete copy.highEntropyValues;
+      delete copy.highEntropyValuesError;
+      return copy;
     }
+    return v;
+  }
+
+  function fgValuesEqual(key, a, b) {
+    var bCompare = (key === 'userAgentData') ? fgStripHighEntropy(b) : b;
     return JSON.stringify(a) === JSON.stringify(bCompare);
+  }
+
+  // True when navigator.userAgentData's direct property reads (brands/mobile/
+  // platform) disagree with its own .toJSON() output, WITHIN THE SAME
+  // snapshot - a sign that whatever overrides the getters didn't also patch
+  // toJSON(), so .toJSON()/JSON.stringify() leak a different, un-overridden
+  // value. Skips the comparison (no divergence flagged) when either side is
+  // missing or itself a failure - that's already surfaced by fgIsFailureValue.
+  function fgUaDataDivergesFromJson(direct, json) {
+    if (direct === undefined || json === undefined) return false;
+    if (!direct || typeof direct !== 'object' || Array.isArray(direct)) return false;
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+    if ('error' in direct || 'error' in json) return false;
+    return JSON.stringify(direct) !== JSON.stringify(fgStripHighEntropy(json));
   }
 
   // A "failure" is a call that threw (wrapped as {error: ...} by fgCollectSync/
@@ -159,21 +207,40 @@
       var a = initialSnap ? initialSnap[key] : undefined;
       var b = currentSnap ? currentSnap[key] : undefined;
 
-      var initialClass = '', initialTitle = '';
+      var initialClasses = [], initialTitleParts = [];
       if (fgIsFailureValue(key, a)) {
-        initialClass = 'fg-red';
-        initialTitle = ' title="This call failed or returned an unsupported/undefined result"';
+        initialClasses.push('fg-red');
+        initialTitleParts.push('This call failed or returned an unsupported/undefined result');
       }
 
-      var currentClass = '', currentTitle = '';
+      var currentClasses = [], currentTitleParts = [];
       if (fgIsFailureValue(key, b)) {
-        currentClass = 'fg-red';
-        currentTitle = ' title="This call failed or returned an unsupported/undefined result"';
+        currentClasses.push('fg-red');
+        currentTitleParts.push('This call failed or returned an unsupported/undefined result');
       } else if (a !== undefined && b !== undefined) {
         var matches = fgValuesEqual(key, a, b);
-        currentClass = matches ? 'fg-green' : 'fg-red';
-        currentTitle = matches ? ' title="Matches the initial value"' : ' title="Differs from the initial value"';
+        currentClasses.push(matches ? 'fg-green' : 'fg-red');
+        currentTitleParts.push(matches ? 'Matches the initial value' : 'Differs from the initial value');
       }
+
+      // Distinct, independent signal: does the direct-read value diverge from
+      // .toJSON()'s value in that SAME snapshot? Composes with (doesn't
+      // replace) the classes/tooltip above.
+      if (key === 'userAgentDataDirect') {
+        if (fgUaDataDivergesFromJson(a, initialSnap ? initialSnap.userAgentData : undefined)) {
+          initialClasses.push('fg-uadata-diverges');
+          initialTitleParts.push("Differs from navigator.userAgentData.toJSON()'s value in this same snapshot");
+        }
+        if (fgUaDataDivergesFromJson(b, currentSnap ? currentSnap.userAgentData : undefined)) {
+          currentClasses.push('fg-uadata-diverges');
+          currentTitleParts.push("Differs from navigator.userAgentData.toJSON()'s value in this same snapshot");
+        }
+      }
+
+      var initialClass = initialClasses.join(' ');
+      var initialTitle = initialTitleParts.length ? ' title="' + fgEscapeHtml(initialTitleParts.join(' | ')) + '"' : '';
+      var currentClass = currentClasses.join(' ');
+      var currentTitle = currentTitleParts.length ? ' title="' + fgEscapeHtml(currentTitleParts.join(' | ')) + '"' : '';
 
       html += '<tr><td class="fg-metric">' + fgEscapeHtml(label) + '</td>' +
               '<td class="' + initialClass + '"' + initialTitle + '>' + fgFormatValue(a) + '</td>' +
