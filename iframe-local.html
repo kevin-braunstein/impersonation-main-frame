@@ -16,8 +16,11 @@
     2. Opened directly in a tab - it still renders its own table below, for
        standalone debugging.
 
-  Reports its snapshots to window.parent via postMessage (harmless no-op if
-  there is no parent, i.e. when opened standalone).
+  All results are rendered ONLY in this frame's own table below - none of the
+  probe data is sent to window.parent. The only thing posted to the parent is
+  this frame's rendered height (a single number), so the embedding page can
+  size its <iframe> box to fit without showing a scrollbar. That's a harmless
+  no-op when opened standalone (no parent to report to).
   ============================================================================
 -->
 <script>
@@ -57,13 +60,8 @@
     return out;
   }
 
-  // Captured immediately, before anything else in this document runs, and
-  // posted to the parent right away - window.parent already exists as soon
-  // as this frame exists, even before the rest of the document is parsed.
+  // Captured immediately, before anything else in this document runs.
   window.__fgInitialSnapshot = fgCollectSync();
-  if (window.parent && window.parent !== window) {
-    window.parent.postMessage({ source: 'fg-probe', role: 'local', kind: 'initial', data: window.__fgInitialSnapshot }, '*');
-  }
 </script>
 
 <style>
@@ -192,12 +190,19 @@
   var state = { initial: window.__fgInitialSnapshot, current: null };
   var sectionEl = document.getElementById('fg-section');
 
+  // Reports only this frame's rendered height to the parent - NOT the probe
+  // data above, which stays local to this frame's own table. The +2px is a
+  // small buffer against sub-pixel rounding causing a 1px scrollbar to appear.
+  function fgReportHeightToParent() {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ source: 'fg-probe-resize', height: document.documentElement.scrollHeight + 2 }, '*');
+    }
+  }
+
   async function fgUpdate() {
     state.current = await fgCollectFull();
     fgRenderTable(sectionEl, state.initial, state.current);
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ source: 'fg-probe', role: 'local', kind: 'current', data: state.current }, '*');
-    }
+    fgReportHeightToParent();
   }
   fgUpdate();
   setInterval(fgUpdate, 1000);
