@@ -87,6 +87,9 @@
   iframe.fg-frame { width: 100%; height: 240px; border: 1px solid #ccc; overflow: hidden; display: block; }
   .fg-legend-green { background: #d9f2d9; padding: 0 4px; border-radius: 3px; }
   .fg-legend-red { background: #f8d7d7; padding: 0 4px; border-radius: 3px; }
+  .fg-copy-btn { margin: 4px 0; padding: 6px 14px; font-size: 13px; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f5f5f5; }
+  .fg-copy-btn.fg-copy-error { background: #f8d7d7; border-color: #c66; }
+  textarea.fg-copy-fallback { display: none; width: 100%; height: 150px; font-family: monospace; font-size: 11px; margin-top: 6px; box-sizing: border-box; }
 </style>
 </head>
 <body>
@@ -117,10 +120,17 @@
 </p>
 
 <h2>Main frame</h2>
+<button id="fg-copy-main" class="fg-copy-btn" type="button">Copy Main frame metrics</button>
+<p class="fg-note">
+  If the button says the copy failed (clipboard access can be blocked by
+  isolation policy), the JSON will appear in a text box below the button -
+  select it and copy manually.
+</p>
+<textarea id="fg-copy-main-fallback" class="fg-copy-fallback" readonly></textarea>
 <div id="fg-section-main"></div>
 
 <h2>Local iframe (same-origin)</h2>
-<iframe id="fg-frame-local" class="fg-frame" scrolling="no" src="iframe-local.html"></iframe>
+<iframe id="fg-frame-local" class="fg-frame" scrolling="no" allow="clipboard-write" src="iframe-local.html"></iframe>
 
 <h2>Out-of-process iframe (cross-site)</h2>
 <p id="fg-oopif-warning" class="fg-warning" style="display:none;">
@@ -132,7 +142,7 @@
   still the same site under Chromium's Site Isolation and will <em>not</em> end up
   out-of-process.
 </p>
-<iframe id="fg-frame-oopif" class="fg-frame" scrolling="no" src=""></iframe>
+<iframe id="fg-frame-oopif" class="fg-frame" scrolling="no" allow="clipboard-write" src=""></iframe>
 
 <script>
   // ---- Edit this, or pass ?oopif=<url> on this page's URL ----
@@ -245,6 +255,58 @@
     return snap;
   }
 
+  // Copies text to the clipboard so it can be pasted elsewhere (e.g. back
+  // into a chat for analysis). Tries the modern async Clipboard API first;
+  // isolation/permission policy or an insecure context can block that, so it
+  // falls back to the legacy execCommand('copy') technique, and as a last
+  // resort just reveals the text in fallbackTextareaEl for a manual copy.
+  async function fgCopyToClipboard(text, buttonEl, fallbackTextareaEl) {
+    var originalLabel = buttonEl.textContent;
+    function showFeedback(label, isError) {
+      buttonEl.textContent = label;
+      buttonEl.classList.toggle('fg-copy-error', !!isError);
+      setTimeout(function () {
+        buttonEl.textContent = originalLabel;
+        buttonEl.classList.remove('fg-copy-error');
+      }, 2000);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showFeedback('Copied!');
+        return;
+      } catch (e) {
+        // Fall through to the legacy fallback below.
+      }
+    }
+
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        showFeedback('Copied!');
+        return;
+      }
+    } catch (e) {
+      // Fall through to the manual fallback below.
+    }
+
+    if (fallbackTextareaEl) {
+      fallbackTextareaEl.value = text;
+      fallbackTextareaEl.style.display = 'block';
+      fallbackTextareaEl.select();
+    }
+    showFeedback('Copy failed - select the text below', true);
+  }
+
   // ---- Main frame: collect + render directly, no postMessage needed ----
   var mainState = { initial: window.__fgInitialSnapshot, current: null };
   var mainSectionEl = document.getElementById('fg-section-main');
@@ -255,6 +317,19 @@
   }
   fgUpdateMain();
   setInterval(fgUpdateMain, 1000);
+
+  var copyMainBtn = document.getElementById('fg-copy-main');
+  var copyMainFallback = document.getElementById('fg-copy-main-fallback');
+  copyMainBtn.addEventListener('click', function () {
+    var payload = {
+      frame: 'main',
+      href: location.href,
+      copiedAt: new Date().toISOString(),
+      initial: mainState.initial,
+      current: mainState.current
+    };
+    fgCopyToClipboard(JSON.stringify(payload, null, 2), copyMainBtn, copyMainFallback);
+  });
 
   // ---- Child frames render their own tables internally (see iframe-local.html /
   // iframe-oopif.html) - we deliberately do NOT collect or display their probe
