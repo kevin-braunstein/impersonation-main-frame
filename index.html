@@ -15,6 +15,13 @@
   change after the very first script ran?"
   Comparing Main vs Local iframe vs OOPIF answers: "do all frames in this tab
   actually agree?"
+
+  Files:
+    renderer-policy-probe.html  (this file)  - main frame, embeds the other two
+    iframe-local.html                        - same-origin child iframe
+    iframe-oopif.html                        - cross-site child iframe
+                                                (host this on a DIFFERENT SITE,
+                                                 see the warning banner below)
   ============================================================================
 -->
 <script>
@@ -69,10 +76,13 @@
   table.fg-probe-table th, table.fg-probe-table td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; text-align: left; }
   table.fg-probe-table th { background: #f5f5f5; font-size: 13px; }
   table.fg-probe-table td.fg-metric { font-weight: 600; font-size: 13px; width: 22%; }
-  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px; overflow: auto; }
-  td.fg-changed { background: #fff3b0; }
+  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  td.fg-green { background: #d9f2d9; }
+  td.fg-red { background: #f8d7d7; }
   .fg-timestamp { color: #777; font-size: 11px; margin: 4px 0; }
   iframe.fg-frame { width: 100%; height: 240px; border: 1px solid #ccc; }
+  .fg-legend-green { background: #d9f2d9; padding: 0 4px; border-radius: 3px; }
+  .fg-legend-red { background: #f8d7d7; padding: 0 4px; border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -86,7 +96,12 @@
   Each section below shows the same five values for a different frame in this tab:
   the <strong>Initial</strong> column is captured synchronously in that frame's very
   first &lt;script&gt; tag; the <strong>Current</strong> column is re-collected every
-  second. A cell is highlighted if Current differs from Initial.
+  second. Current is highlighted <span class="fg-legend-green">green</span> when it
+  matches Initial and <span class="fg-legend-red">red</span> when it doesn't. Any
+  call that failed or returned an unsupported/undefined result (e.g.
+  <code>window.fireglassGetRendererPolicy</code> not being defined) is highlighted
+  <span class="fg-legend-red">red</span> regardless of whether it matches, since a
+  consistent failure is still a failure.
 </p>
 <p class="fg-note">
   Note: <code>navigator.userAgentData</code>'s high-entropy values (e.g. full version
@@ -162,6 +177,20 @@
     return JSON.stringify(a) === JSON.stringify(bCompare);
   }
 
+  // A "failure" is a call that threw (wrapped as {error: ...} by fgCollectSync/
+  // fgCollectFull), returned our "(... is not defined/supported ...)" placeholder,
+  // or - for userAgentData specifically - had its high-entropy fetch fail while the
+  // low-entropy part still succeeded.
+  function fgIsFailureValue(key, value) {
+    if (value === undefined) return false;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      if ('error' in value) return true;
+      if (key === 'userAgentData' && 'highEntropyValuesError' in value) return true;
+    }
+    if (typeof value === 'string' && /^\(.*\)$/.test(value)) return true;
+    return false;
+  }
+
   function fgRenderTable(containerEl, initialSnap, currentSnap) {
     var capturedAt = (currentSnap && currentSnap.capturedAt) || (initialSnap && initialSnap.capturedAt) || '';
     var html = '<div class="fg-timestamp">Last update: ' + fgEscapeHtml(capturedAt) + '</div>';
@@ -172,10 +201,26 @@
       var label = pair[0], key = pair[1];
       var a = initialSnap ? initialSnap[key] : undefined;
       var b = currentSnap ? currentSnap[key] : undefined;
-      var changed = (a !== undefined && b !== undefined && !fgValuesEqual(key, a, b));
+
+      var initialClass = '', initialTitle = '';
+      if (fgIsFailureValue(key, a)) {
+        initialClass = 'fg-red';
+        initialTitle = ' title="This call failed or returned an unsupported/undefined result"';
+      }
+
+      var currentClass = '', currentTitle = '';
+      if (fgIsFailureValue(key, b)) {
+        currentClass = 'fg-red';
+        currentTitle = ' title="This call failed or returned an unsupported/undefined result"';
+      } else if (a !== undefined && b !== undefined) {
+        var matches = fgValuesEqual(key, a, b);
+        currentClass = matches ? 'fg-green' : 'fg-red';
+        currentTitle = matches ? ' title="Matches the initial value"' : ' title="Differs from the initial value"';
+      }
+
       html += '<tr><td class="fg-metric">' + fgEscapeHtml(label) + '</td>' +
-              '<td>' + fgFormatValue(a) + '</td>' +
-              '<td class="' + (changed ? 'fg-changed' : '') + '">' + fgFormatValue(b) + '</td></tr>';
+              '<td class="' + initialClass + '"' + initialTitle + '>' + fgFormatValue(a) + '</td>' +
+              '<td class="' + currentClass + '"' + currentTitle + '>' + fgFormatValue(b) + '</td></tr>';
     });
     html += '</tbody></table>';
     containerEl.innerHTML = html;
