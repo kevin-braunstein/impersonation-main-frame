@@ -76,6 +76,9 @@
   td.fg-green { background: #d9f2d9; }
   td.fg-red { background: #f8d7d7; }
   .fg-timestamp { color: #777; font-size: 10px; margin: 2px 0; }
+  .fg-copy-btn { margin: 4px 0; padding: 5px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f5f5f5; }
+  .fg-copy-btn.fg-copy-error { background: #f8d7d7; border-color: #c66; }
+  textarea.fg-copy-fallback { display: none; width: 100%; height: 130px; font-family: monospace; font-size: 10px; margin-top: 6px; box-sizing: border-box; }
 </style>
 </head>
 <body>
@@ -85,6 +88,13 @@
   Origin: <code id="fg-origin"></code> &middot;
   Is top: <code id="fg-is-top"></code>
 </p>
+<button id="fg-copy-btn" class="fg-copy-btn" type="button">Copy this frame's metrics</button>
+<p class="fg-note">
+  If the button says the copy failed (clipboard access can be blocked by
+  isolation policy), the JSON will appear in a text box below - select it and
+  copy manually.
+</p>
+<textarea id="fg-copy-fallback" class="fg-copy-fallback" readonly></textarea>
 <div id="fg-section"></div>
 <p class="fg-note">
   navigator.userAgentData's high-entropy values only appear in the Current
@@ -187,6 +197,58 @@
     return snap;
   }
 
+  // Copies text to the clipboard so it can be pasted elsewhere (e.g. back
+  // into a chat for analysis). Tries the modern async Clipboard API first;
+  // isolation/permission policy or an insecure context can block that, so it
+  // falls back to the legacy execCommand('copy') technique, and as a last
+  // resort just reveals the text in fallbackTextareaEl for a manual copy.
+  async function fgCopyToClipboard(text, buttonEl, fallbackTextareaEl) {
+    var originalLabel = buttonEl.textContent;
+    function showFeedback(label, isError) {
+      buttonEl.textContent = label;
+      buttonEl.classList.toggle('fg-copy-error', !!isError);
+      setTimeout(function () {
+        buttonEl.textContent = originalLabel;
+        buttonEl.classList.remove('fg-copy-error');
+      }, 2000);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showFeedback('Copied!');
+        return;
+      } catch (e) {
+        // Fall through to the legacy fallback below.
+      }
+    }
+
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        showFeedback('Copied!');
+        return;
+      }
+    } catch (e) {
+      // Fall through to the manual fallback below.
+    }
+
+    if (fallbackTextareaEl) {
+      fallbackTextareaEl.value = text;
+      fallbackTextareaEl.style.display = 'block';
+      fallbackTextareaEl.select();
+    }
+    showFeedback('Copy failed - select the text below', true);
+  }
+
   var state = { initial: window.__fgInitialSnapshot, current: null };
   var sectionEl = document.getElementById('fg-section');
 
@@ -206,6 +268,19 @@
   }
   fgUpdate();
   setInterval(fgUpdate, 1000);
+
+  var copyBtn = document.getElementById('fg-copy-btn');
+  var copyFallback = document.getElementById('fg-copy-fallback');
+  copyBtn.addEventListener('click', function () {
+    var payload = {
+      frame: 'local iframe (same-origin)',
+      href: location.href,
+      copiedAt: new Date().toISOString(),
+      initial: state.initial,
+      current: state.current
+    };
+    fgCopyToClipboard(JSON.stringify(payload, null, 2), copyBtn, copyFallback);
+  });
 </script>
 
 </body>
