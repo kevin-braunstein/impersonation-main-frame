@@ -2,30 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Renderer Policy / Navigator Probe — Main frame</title>
+<title>Renderer Policy / Navigator Probe — Local iframe</title>
 
 <!--
   ============================================================================
-  This is the very first <script> in the document. It captures a SYNCHRONOUS
-  snapshot of the requested values before any other script, stylesheet, or
-  layout work runs — this becomes the "Initial" column below. The "Current"
-  column is re-collected every second via setInterval.
+  Same-origin child frame for renderer-policy-probe.html.
 
-  Comparing Initial vs Current on the SAME frame answers: "did these values
-  change after the very first script ran?"
-  Comparing Main vs Local iframe vs OOPIF answers: "do all frames in this tab
-  actually agree?" - open each iframe's own devtools context (or view it
-  standalone) to see its table; the local/oopif frames render their own
-  results and do NOT report the probe data back up to this page. The only
-  thing they post up here is their own height (a single number), purely so
-  this page can size their <iframe> box without showing a scrollbar.
+  This is meant to be loaded two ways:
+    1. Embedded via <iframe src="iframe-local.html"> from a page on the SAME
+       origin - this is the "local iframe" case: same site, so under
+       Chromium/CEF Site Isolation this normally shares the parent's renderer
+       process (same TID_RENDERER thread).
+    2. Opened directly in a tab - it still renders its own table below, for
+       standalone debugging.
 
-  Files:
-    renderer-policy-probe.html  (this file)  - main frame, embeds the other two
-    iframe-local.html                        - same-origin child iframe
-    iframe-oopif.html                        - cross-site child iframe
-                                                (host this on a DIFFERENT SITE,
-                                                 see the warning banner below)
+  All results are rendered ONLY in this frame's own table below - none of the
+  probe data is sent to window.parent. The only thing posted to the parent is
+  this frame's rendered height (a single number), so the embedding page can
+  size its <iframe> box to fit without showing a scrollbar. That's a harmless
+  no-op when opened standalone (no parent to report to).
   ============================================================================
 -->
 <script>
@@ -87,107 +82,59 @@
 </script>
 
 <style>
-  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }
-  h1 { font-size: 20px; }
-  h2 { font-size: 16px; margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-  .fg-meta { color: #555; font-size: 13px; margin-bottom: 8px; }
-  .fg-note { color: #555; font-size: 12px; font-style: italic; }
-  .fg-warning { background: #fff3cd; border: 1px solid #ffe69c; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
-  table.fg-probe-table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 8px; }
-  table.fg-probe-table th, table.fg-probe-table td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; text-align: left; }
-  table.fg-probe-table th { background: #f5f5f5; font-size: 13px; }
-  table.fg-probe-table td.fg-metric { font-weight: 600; font-size: 13px; width: 22%; }
-  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  /* Suppresses this document's OWN scrollbar. Neither the parent's overflow:hidden
+     on the <iframe> box nor the legacy scrolling="no" attribute control this - both
+     only affect how the outer box clips relative to the parent page, not whether
+     this document scrolls internally. Without this, a transient scrollbar can eat
+     ~15px of width, wrap a long JSON line in a <pre> block onto an extra line, and
+     since un-wrapping requires the width back (not just more height), the reported
+     height only ever ratchets up from there. */
+  html { overflow: hidden; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; color: #111; font-size: 13px; }
+  .fg-meta { color: #555; margin-bottom: 8px; }
+  .fg-note { color: #555; font-size: 11px; font-style: italic; }
+  table.fg-probe-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  table.fg-probe-table th, table.fg-probe-table td { border: 1px solid #ddd; padding: 4px 6px; vertical-align: top; text-align: left; }
+  table.fg-probe-table th { background: #f5f5f5; }
+  table.fg-probe-table td.fg-metric { font-weight: 600; width: 22%; }
+  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
   td.fg-green { background: #d9f2d9; }
   td.fg-red { background: #f8d7d7; }
   td.fg-uadata-diverges { outline: 3px solid #ff9800; outline-offset: -3px; }
-  .fg-timestamp { color: #777; font-size: 11px; margin: 4px 0; }
-  iframe.fg-frame { width: 100%; height: 240px; border: 1px solid #ccc; overflow: hidden; display: block; }
-  .fg-legend-green { background: #d9f2d9; padding: 0 4px; border-radius: 3px; }
-  .fg-legend-red { background: #f8d7d7; padding: 0 4px; border-radius: 3px; }
-  .fg-legend-orange { outline: 3px solid #ff9800; outline-offset: -2px; padding: 0 4px; border-radius: 3px; }
-  .fg-copy-btn { margin: 4px 0; padding: 6px 14px; font-size: 13px; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f5f5f5; }
+  .fg-timestamp { color: #777; font-size: 10px; margin: 2px 0; }
+  .fg-copy-btn { margin: 4px 0; padding: 5px 12px; font-size: 12px; cursor: pointer; border: 1px solid #888; border-radius: 4px; background: #f5f5f5; }
   .fg-copy-btn.fg-copy-error { background: #f8d7d7; border-color: #c66; }
-  textarea.fg-copy-fallback { display: none; width: 100%; height: 150px; font-family: monospace; font-size: 11px; margin-top: 6px; box-sizing: border-box; }
+  textarea.fg-copy-fallback { display: none; width: 100%; height: 130px; font-family: monospace; font-size: 10px; margin-top: 6px; box-sizing: border-box; }
 </style>
 </head>
 <body>
 
-<h1>Renderer Policy / Navigator Probe</h1>
 <p class="fg-meta">
+  Frame: <strong>local iframe (same-origin)</strong> &middot;
   Origin: <code id="fg-origin"></code> &middot;
-  Loaded at: <code id="fg-loaded-at"></code>
+  Is top: <code id="fg-is-top"></code>
 </p>
-<p>
-  The same five values are shown for three different frames in this tab: the Main
-  frame's table is below; the local iframe's and OOPIF's own tables are rendered
-  inside their respective &lt;iframe&gt; boxes further down this page (open each
-  one's own devtools context, or view it standalone, to inspect it directly). In
-  every table, the <strong>Initial</strong> column is captured synchronously in
-  that frame's very first &lt;script&gt; tag; the <strong>Current</strong> column
-  is re-collected every second. Current is highlighted <span class="fg-legend-green">green</span>
-  when it matches Initial and <span class="fg-legend-red">red</span> when it
-  doesn't. Any call that failed or returned an unsupported/undefined result (e.g.
-  <code>window.fireglassGetRendererPolicy</code> not being defined) is highlighted
-  <span class="fg-legend-red">red</span> regardless of whether it matches, since a
-  consistent failure is still a failure. The <code>navigator.userAgentData (direct
-  property reads)</code> row additionally gets an <span class="fg-legend-orange">orange
-  outline</span> whenever its value differs from <code>navigator.userAgentData.toJSON()</code>
-  in that same snapshot - Chromium's native <code>toJSON()</code> reads an internal engine
-  slot rather than the JS-visible getters, so an override that patches the getters but not
-  <code>toJSON()</code> will leak a different, un-overridden value to anything that calls
-  <code>.toJSON()</code> or <code>JSON.stringify(navigator.userAgentData)</code>.
-</p>
-<p class="fg-note">
-  Note: <code>navigator.userAgentData</code>'s high-entropy values (e.g. full version
-  list, platform version) can only be read asynchronously per spec, so they only
-  ever appear in the Current column — never in Initial, and that's expected.
-</p>
-
-<h2>Main frame</h2>
-<button id="fg-copy-main" class="fg-copy-btn" type="button">Copy Main frame metrics</button>
+<button id="fg-copy-btn" class="fg-copy-btn" type="button">Copy this frame's metrics</button>
 <p class="fg-note">
   If the button says the copy failed (clipboard access can be blocked by
-  isolation policy), the JSON will appear in a text box below the button -
-  select it and copy manually.
+  isolation policy), the JSON will appear in a text box below - select it and
+  copy manually.
 </p>
-<textarea id="fg-copy-main-fallback" class="fg-copy-fallback" readonly></textarea>
-<div id="fg-section-main"></div>
-
-<h2>Local iframe (same-origin)</h2>
-<iframe id="fg-frame-local" class="fg-frame" scrolling="no" allow="clipboard-write" src="iframe-local.html"></iframe>
-
-<h2>Out-of-process iframe (cross-site)</h2>
-<p id="fg-oopif-warning" class="fg-warning" style="display:none;">
-  Set <code>OOPIF_URL_OVERRIDE</code> in the last &lt;script&gt; below (or pass
-  <code>?oopif=&lt;url&gt;</code> in this page's query string) to wherever you're
-  hosting <code>iframe-oopif.html</code>. It must be on a genuinely different
-  <strong>site</strong> (a different registrable domain, e.g. <code>frame-a.test</code>
-  vs <code>frame-b.test</code>) &mdash; a different port on the same host is usually
-  still the same site under Chromium's Site Isolation and will <em>not</em> end up
-  out-of-process.
+<textarea id="fg-copy-fallback" class="fg-copy-fallback" readonly></textarea>
+<div id="fg-section"></div>
+<p class="fg-note">
+  navigator.userAgentData's high-entropy values only appear in the Current
+  column - they're async by spec and can't be captured in the Initial script.
+  The "direct property reads" row gets an orange outline whenever it differs
+  from .toJSON()'s value in the same snapshot - Chromium's native toJSON()
+  reads an internal engine slot rather than the JS-visible getters, so an
+  override that patches the getters but not toJSON() leaks a different value
+  to anything calling .toJSON() or JSON.stringify(navigator.userAgentData).
 </p>
-<iframe id="fg-frame-oopif" class="fg-frame" scrolling="no" allow="clipboard-write" src=""></iframe>
 
 <script>
-  // Sentinel marking "not configured yet" - do NOT edit this line, it's only
-  // used below to detect whether OOPIF_URL_OVERRIDE has been changed.
-  var OOPIF_URL_UNCONFIGURED = 'https://REPLACE-WITH-A-DIFFERENT-SITE.example/iframe-oopif.html';
-
-  // ---- EDIT THIS LINE to your hosted iframe-oopif.html URL, or pass ?oopif=<url> instead ----
-  var OOPIF_URL_OVERRIDE = 'https://kevinbraunstein.github.io/impersonation-oopif/iframe-oopif.html';
-
-  var OOPIF_URL = new URLSearchParams(location.search).get('oopif') || OOPIF_URL_OVERRIDE;
-
   document.getElementById('fg-origin').textContent = location.origin;
-  document.getElementById('fg-loaded-at').textContent = new Date().toISOString();
-
-  var oopifFrameEl = document.getElementById('fg-frame-oopif');
-  if (OOPIF_URL === OOPIF_URL_UNCONFIGURED) {
-    document.getElementById('fg-oopif-warning').style.display = 'block';
-  } else {
-    oopifFrameEl.src = OOPIF_URL;
-  }
+  document.getElementById('fg-is-top').textContent = (window === window.top);
 
   var METRICS = [
     ['window.fireglassGetRendererPolicy()', 'fireglassGetRendererPolicy'],
@@ -377,47 +324,37 @@
     showFeedback('Copy failed - select the text below', true);
   }
 
-  // ---- Main frame: collect + render directly, no postMessage needed ----
-  var mainState = { initial: window.__fgInitialSnapshot, current: null };
-  var mainSectionEl = document.getElementById('fg-section-main');
+  var state = { initial: window.__fgInitialSnapshot, current: null };
+  var sectionEl = document.getElementById('fg-section');
 
-  async function fgUpdateMain() {
-    mainState.current = await fgCollectFull();
-    fgRenderTable(mainSectionEl, mainState.initial, mainState.current);
+  // Reports only this frame's rendered height to the parent - NOT the probe
+  // data above, which stays local to this frame's own table. The +2px is a
+  // small buffer against sub-pixel rounding causing a 1px scrollbar to appear.
+  function fgReportHeightToParent() {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ source: 'fg-probe-resize', height: document.documentElement.scrollHeight + 2 }, '*');
+    }
   }
-  fgUpdateMain();
-  setInterval(fgUpdateMain, 1000);
 
-  var copyMainBtn = document.getElementById('fg-copy-main');
-  var copyMainFallback = document.getElementById('fg-copy-main-fallback');
-  copyMainBtn.addEventListener('click', function () {
+  async function fgUpdate() {
+    state.current = await fgCollectFull();
+    fgRenderTable(sectionEl, state.initial, state.current);
+    fgReportHeightToParent();
+  }
+  fgUpdate();
+  setInterval(fgUpdate, 1000);
+
+  var copyBtn = document.getElementById('fg-copy-btn');
+  var copyFallback = document.getElementById('fg-copy-fallback');
+  copyBtn.addEventListener('click', function () {
     var payload = {
-      frame: 'main',
+      frame: 'local iframe (same-origin)',
       href: location.href,
       copiedAt: new Date().toISOString(),
-      initial: mainState.initial,
-      current: mainState.current
+      initial: state.initial,
+      current: state.current
     };
-    fgCopyToClipboard(JSON.stringify(payload, null, 2), copyMainBtn, copyMainFallback);
-  });
-
-  // ---- Child frames render their own tables internally (see iframe-local.html /
-  // iframe-oopif.html) - we deliberately do NOT collect or display their probe
-  // data here. The only thing they report up is their own rendered height (a
-  // single number), purely so their <iframe> box can be sized to fit without a
-  // scrollbar. Bind by contentWindow identity, not a self-reported label, so a
-  // message can't be misattributed to the wrong iframe.
-  var localFrameEl = document.getElementById('fg-frame-local');
-
-  window.addEventListener('message', function (event) {
-    var msg = event.data;
-    if (!msg || msg.source !== 'fg-probe-resize' || typeof msg.height !== 'number') return;
-
-    if (event.source === localFrameEl.contentWindow) {
-      localFrameEl.style.height = msg.height + 'px';
-    } else if (event.source === oopifFrameEl.contentWindow) {
-      oopifFrameEl.style.height = msg.height + 'px';
-    }
+    fgCopyToClipboard(JSON.stringify(payload, null, 2), copyBtn, copyFallback);
   });
 </script>
 
