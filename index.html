@@ -159,7 +159,7 @@
 
 <h2>Out-of-process iframe (cross-site)</h2>
 <p id="fg-oopif-warning" class="fg-warning" style="display:none;">
-  Set <code>OOPIF_URL_PLACEHOLDER</code> in the last &lt;script&gt; below (or pass
+  Set <code>OOPIF_URL_OVERRIDE</code> in the last &lt;script&gt; below (or pass
   <code>?oopif=&lt;url&gt;</code> in this page's query string) to wherever you're
   hosting <code>iframe-oopif.html</code>. It must be on a genuinely different
   <strong>site</strong> (a different registrable domain, e.g. <code>frame-a.test</code>
@@ -170,15 +170,20 @@
 <iframe id="fg-frame-oopif" class="fg-frame" scrolling="no" allow="clipboard-write" src=""></iframe>
 
 <script>
-  // ---- Edit this, or pass ?oopif=<url> on this page's URL ----
-  var OOPIF_URL_PLACEHOLDER = 'https://kevinbraunstein.github.io/impersonation-oopif/iframe-oopif.html';
-  var OOPIF_URL = new URLSearchParams(location.search).get('oopif') || OOPIF_URL_PLACEHOLDER;
+  // Sentinel marking "not configured yet" - do NOT edit this line, it's only
+  // used below to detect whether OOPIF_URL_OVERRIDE has been changed.
+  var OOPIF_URL_UNCONFIGURED = 'https://REPLACE-WITH-A-DIFFERENT-SITE.example/iframe-oopif.html';
+
+  // ---- EDIT THIS LINE to your hosted iframe-oopif.html URL, or pass ?oopif=<url> instead ----
+  var OOPIF_URL_OVERRIDE = 'https://kevinbraunstein.github.io/impersonation-oopif/iframe-oopif.html';
+
+  var OOPIF_URL = new URLSearchParams(location.search).get('oopif') || OOPIF_URL_OVERRIDE;
 
   document.getElementById('fg-origin').textContent = location.origin;
   document.getElementById('fg-loaded-at').textContent = new Date().toISOString();
 
   var oopifFrameEl = document.getElementById('fg-frame-oopif');
-  if (OOPIF_URL === OOPIF_URL_PLACEHOLDER) {
+  if (OOPIF_URL === OOPIF_URL_UNCONFIGURED) {
     document.getElementById('fg-oopif-warning').style.display = 'block';
   } else {
     oopifFrameEl.src = OOPIF_URL;
