@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Renderer Policy / Navigator Probe — Main frame</title>
+
+<!--
+  ============================================================================
+  This is the very first <script> in the document. It captures a SYNCHRONOUS
+  snapshot of the requested values before any other script, stylesheet, or
+  layout work runs — this becomes the "Initial" column below. The "Current"
+  column is re-collected every second via setInterval.
+
+  Comparing Initial vs Current on the SAME frame answers: "did these values
+  change after the very first script ran?"
+  Comparing Main vs Local iframe vs OOPIF answers: "do all frames in this tab
+  actually agree?"
+  ============================================================================
+-->
+<script>
+  function fgCollectSync() {
+    var out = { capturedAt: new Date().toISOString() };
+
+    try {
+      out.fireglassGetRendererPolicy = (typeof window.fireglassGetRendererPolicy === 'function')
+        ? window.fireglassGetRendererPolicy()
+        : '(window.fireglassGetRendererPolicy is not defined in this context)';
+    } catch (e) {
+      out.fireglassGetRendererPolicy = { error: String(e) };
+    }
+
+    out.userAgent = navigator.userAgent;
+
+    try {
+      out.userAgentData = navigator.userAgentData
+        ? navigator.userAgentData.toJSON()
+        : '(navigator.userAgentData is not supported in this context)';
+    } catch (e) {
+      out.userAgentData = { error: String(e) };
+    }
+
+    try {
+      out.languages = Array.from(navigator.languages || []);
+    } catch (e) {
+      out.languages = { error: String(e) };
+    }
+
+    try {
+      out.intlDateTimeFormatResolvedOptions = new Intl.DateTimeFormat().resolvedOptions();
+    } catch (e) {
+      out.intlDateTimeFormatResolvedOptions = { error: String(e) };
+    }
+
+    return out;
+  }
+
+  // Captured immediately, before anything else in this document runs.
+  window.__fgInitialSnapshot = fgCollectSync();
+</script>
+
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; color: #111; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .fg-meta { color: #555; font-size: 13px; margin-bottom: 8px; }
+  .fg-note { color: #555; font-size: 12px; font-style: italic; }
+  .fg-warning { background: #fff3cd; border: 1px solid #ffe69c; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+  table.fg-probe-table { border-collapse: collapse; width: 100%; table-layout: fixed; margin-top: 8px; }
+  table.fg-probe-table th, table.fg-probe-table td { border: 1px solid #ddd; padding: 6px 8px; vertical-align: top; text-align: left; }
+  table.fg-probe-table th { background: #f5f5f5; font-size: 13px; }
+  table.fg-probe-table td.fg-metric { font-weight: 600; font-size: 13px; width: 22%; }
+  table.fg-probe-table pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px; overflow: auto; }
+  td.fg-changed { background: #fff3b0; }
+  .fg-timestamp { color: #777; font-size: 11px; margin: 4px 0; }
+  iframe.fg-frame { width: 100%; height: 240px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+
+<h1>Renderer Policy / Navigator Probe</h1>
+<p class="fg-meta">
+  Origin: <code id="fg-origin"></code> &middot;
+  Loaded at: <code id="fg-loaded-at"></code>
+</p>
+<p>
+  Each section below shows the same five values for a different frame in this tab:
+  the <strong>Initial</strong> column is captured synchronously in that frame's very
+  first &lt;script&gt; tag; the <strong>Current</strong> column is re-collected every
+  second. A cell is highlighted if Current differs from Initial.
+</p>
+<p class="fg-note">
+  Note: <code>navigator.userAgentData</code>'s high-entropy values (e.g. full version
+  list, platform version) can only be read asynchronously per spec, so they only
+  ever appear in the Current column — never in Initial, and that's expected.
+</p>
+
+<h2>Main frame</h2>
+<div id="fg-section-main"></div>
+
+<h2>Local iframe (same-origin)</h2>
+<iframe id="fg-frame-local" class="fg-frame" src="iframe-local.html"></iframe>
+<div id="fg-section-local"></div>
+
+<h2>Out-of-process iframe (cross-site)</h2>
+<p id="fg-oopif-warning" class="fg-warning" style="display:none;">
+  Set <code>OOPIF_URL_PLACEHOLDER</code> in the last &lt;script&gt; below (or pass
+  <code>?oopif=&lt;url&gt;</code> in this page's query string) to wherever you're
+  hosting <code>iframe-oopif.html</code>. It must be on a genuinely different
+  <strong>site</strong> (a different registrable domain, e.g. <code>frame-a.test</code>
+  vs <code>frame-b.test</code>) &mdash; a different port on the same host is usually
+  still the same site under Chromium's Site Isolation and will <em>not</em> end up
+  out-of-process.
+</p>
+<iframe id="fg-frame-oopif" class="fg-frame" src=""></iframe>
+<div id="fg-section-oopif"></div>
+
+<script>
+  // ---- Edit this, or pass ?oopif=<url> on this page's URL ----
+  var OOPIF_URL_PLACEHOLDER = 'https://REPLACE-WITH-A-DIFFERENT-SITE.example/iframe-oopif.html';
+  var OOPIF_URL = new URLSearchParams(location.search).get('oopif') || OOPIF_URL_PLACEHOLDER;
+
+  document.getElementById('fg-origin').textContent = location.origin;
+  document.getElementById('fg-loaded-at').textContent = new Date().toISOString();
+
+  var oopifFrameEl = document.getElementById('fg-frame-oopif');
+  if (OOPIF_URL === OOPIF_URL_PLACEHOLDER) {
+    document.getElementById('fg-oopif-warning').style.display = 'block';
+  } else {
+    oopifFrameEl.src = OOPIF_URL;
+  }
+
+  var METRICS = [
+    ['window.fireglassGetRendererPolicy()', 'fireglassGetRendererPolicy'],
+    ['navigator.userAgent', 'userAgent'],
+    ['navigator.userAgentData', 'userAgentData'],
+    ['navigator.languages', 'languages'],
+    ['Intl.DateTimeFormat().resolvedOptions()', 'intlDateTimeFormatResolvedOptions']
+  ];
+
+  function fgEscapeHtml(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+
+  function fgFormatValue(v) {
+    if (v === undefined) return '<em>(not yet received)</em>';
+    return '<pre>' + fgEscapeHtml(JSON.stringify(v, null, 2)) + '</pre>';
+  }
+
+  // navigator.userAgentData's "Current" value carries an extra async
+  // highEntropyValues field that "Initial" can never have (see note above).
+  // Strip it before diffing so that addition alone doesn't spuriously flag
+  // the row as "changed".
+  function fgValuesEqual(key, a, b) {
+    var bCompare = b;
+    if (key === 'userAgentData' && b && typeof b === 'object') {
+      bCompare = Object.assign({}, b);
+      delete bCompare.highEntropyValues;
+      delete bCompare.highEntropyValuesError;
+    }
+    return JSON.stringify(a) === JSON.stringify(bCompare);
+  }
+
+  function fgRenderTable(containerEl, initialSnap, currentSnap) {
+    var capturedAt = (currentSnap && currentSnap.capturedAt) || (initialSnap && initialSnap.capturedAt) || '';
+    var html = '<div class="fg-timestamp">Last update: ' + fgEscapeHtml(capturedAt) + '</div>';
+    html += '<table class="fg-probe-table"><thead><tr>' +
+            '<th>Metric</th><th>Initial (page load)</th><th>Current (live)</th>' +
+            '</tr></thead><tbody>';
+    METRICS.forEach(function (pair) {
+      var label = pair[0], key = pair[1];
+      var a = initialSnap ? initialSnap[key] : undefined;
+      var b = currentSnap ? currentSnap[key] : undefined;
+      var changed = (a !== undefined && b !== undefined && !fgValuesEqual(key, a, b));
+      html += '<tr><td class="fg-metric">' + fgEscapeHtml(label) + '</td>' +
+              '<td>' + fgFormatValue(a) + '</td>' +
+              '<td class="' + (changed ? 'fg-changed' : '') + '">' + fgFormatValue(b) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    containerEl.innerHTML = html;
+  }
+
+  async function fgCollectFull() {
+    var snap = fgCollectSync();
+    if (navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === 'function') {
+      try {
+        var hints = ['architecture', 'bitness', 'formFactors', 'fullVersionList', 'model', 'platformVersion', 'uaFullVersion', 'wow64'];
+        var highEntropy = await navigator.userAgentData.getHighEntropyValues(hints);
+        snap.userAgentData = Object.assign({}, snap.userAgentData, { highEntropyValues: highEntropy });
+      } catch (e) {
+        snap.userAgentData = Object.assign({}, snap.userAgentData, { highEntropyValuesError: String(e) });
+      }
+    }
+    return snap;
+  }
+
+  // ---- Main frame: collect + render directly, no postMessage needed ----
+  var mainState = { initial: window.__fgInitialSnapshot, current: null };
+  var mainSectionEl = document.getElementById('fg-section-main');
+
+  async function fgUpdateMain() {
+    mainState.current = await fgCollectFull();
+    fgRenderTable(mainSectionEl, mainState.initial, mainState.current);
+  }
+  fgUpdateMain();
+  setInterval(fgUpdateMain, 1000);
+
+  // ---- Child frames report in via postMessage ----
+  var childState = {
+    local: { initial: null, current: null },
+    oopif: { initial: null, current: null }
+  };
+  var localFrameEl = document.getElementById('fg-frame-local');
+  var localSectionEl = document.getElementById('fg-section-local');
+  var oopifSectionEl = document.getElementById('fg-section-oopif');
+
+  window.addEventListener('message', function (event) {
+    var msg = event.data;
+    if (!msg || msg.source !== 'fg-probe') return;
+
+    // Bind by contentWindow identity, not the self-reported role string,
+    // so a message can't be misattributed to the wrong section.
+    var role = null;
+    if (event.source === localFrameEl.contentWindow) role = 'local';
+    else if (event.source === oopifFrameEl.contentWindow) role = 'oopif';
+    if (!role) return;
+
+    childState[role][msg.kind] = msg.data; // kind: 'initial' | 'current'
+    fgRenderTable(role === 'local' ? localSectionEl : oopifSectionEl,
+                  childState[role].initial, childState[role].current);
+  });
+
+  // Placeholder tables until the child frames report in.
+  fgRenderTable(localSectionEl, null, null);
+  fgRenderTable(oopifSectionEl, null, null);
+</script>
+
+</body>
+</html>
